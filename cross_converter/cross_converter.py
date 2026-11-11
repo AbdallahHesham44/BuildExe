@@ -17,6 +17,7 @@ and writes two Excel files:
 
 import os
 import sys
+import subprocess
 import traceback
 
 import pandas as pd
@@ -135,40 +136,148 @@ def convert(input_path, output_dir):
     return len(df), p1, p2
 
 
+# ---------------------------------------------------------------------------
+# Non-blocking Native File & Folder Dialogs (Avoids WebView2 COM Deadlock)
+# ---------------------------------------------------------------------------
+def pick_file_tkinter(title="Select Excel File"):
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.focus_force()
+    path = filedialog.askopenfilename(
+        parent=root,
+        title=title,
+        filetypes=[
+            ("Excel files", "*.xlsx;*.xlsm;*.xls"),
+            ("All files", "*.*"),
+        ],
+    )
+    root.destroy()
+    return (path or "").strip()
+
+
+def pick_folder_tkinter(title="Select Output Folder"):
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.focus_force()
+    path = filedialog.askdirectory(parent=root, title=title)
+    root.destroy()
+    return (path or "").strip()
+
+
+def pick_file_powershell(title="Select Excel File"):
+    try:
+        ps_cmd = (
+            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+            "$f = New-Object System.Windows.Forms.OpenFileDialog; "
+            "$f.Filter = 'Excel Files (*.xlsx;*.xlsm;*.xls)|*.xlsx;*.xlsm;*.xls|All Files (*.*)|*.*'; "
+            f"$f.Title = '{title}'; "
+            "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return res.stdout.strip()
+    except Exception:
+        return ""
+
+
+def pick_folder_powershell(title="Select Output Folder"):
+    try:
+        ps_cmd = (
+            "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+            "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$f.Description = '{title}'; "
+            "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return res.stdout.strip()
+    except Exception:
+        return ""
+
+
+def select_file():
+    # 1. Try tkinter (clean native dialog, no WebView2 conflict)
+    try:
+        p = pick_file_tkinter()
+        if p:
+            return p
+    except Exception:
+        pass
+
+    # 2. Try PowerShell fallback on Windows
+    if sys.platform == "win32" or os.name == "nt":
+        try:
+            p = pick_file_powershell()
+            if p:
+                return p
+        except Exception:
+            pass
+
+    return ""
+
+
+def select_folder():
+    # 1. Try tkinter
+    try:
+        p = pick_folder_tkinter()
+        if p:
+            return p
+    except Exception:
+        pass
+
+    # 2. Try PowerShell fallback on Windows
+    if sys.platform == "win32" or os.name == "nt":
+        try:
+            p = pick_folder_powershell()
+            if p:
+                return p
+        except Exception:
+            pass
+
+    return ""
+
+
 class Api:
     def __init__(self):
         self.window = None
 
     def pick_input(self):
-        if not self.window:
-            return ""
         try:
-            r = self.window.create_file_dialog(
-                webview.OPEN_DIALOG,
-                file_types=("Excel files (*.xlsx;*.xlsm;*.xls)", "All files (*.*)"),
-            )
-            return r[0] if r else ""
+            return select_file()
         except Exception as e:
             traceback.print_exc()
             return ""
 
     def pick_output_dir(self):
-        if not self.window:
-            return ""
         try:
-            r = self.window.create_file_dialog(webview.FOLDER_DIALOG)
-            return r[0] if r else ""
+            return select_folder()
         except Exception as e:
             traceback.print_exc()
             return ""
 
     def run(self, input_path, output_dir):
         try:
-            input_path = (input_path or "").strip()
-            output_dir = (output_dir or "").strip()
+            input_path = (input_path or "").strip().strip('"').strip("'")
+            output_dir = (output_dir or "").strip().strip('"').strip("'")
 
             if not input_path or not os.path.isfile(input_path):
-                return {"ok": False, "msg": "Please choose a valid input Excel file."}
+                return {"ok": False, "msg": f"Please choose a valid input Excel file: {input_path}"}
             if not output_dir:
                 output_dir = os.path.dirname(input_path) or os.getcwd()
 
@@ -245,7 +354,6 @@ HTML = """<!DOCTYPE html>
     background: var(--bg);
     color: var(--text);
     font-size: 13px;
-    cursor: pointer;
   }
   input:focus { outline: 2px solid var(--accent); }
   button {
@@ -258,6 +366,7 @@ HTML = """<!DOCTYPE html>
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s ease-in-out;
+    white-space: nowrap;
   }
   button:hover { background: var(--accent-hover); }
   button.secondary {
@@ -297,11 +406,6 @@ HTML = """<!DOCTYPE html>
     background: var(--err-bg);
     border: 1px solid var(--err);
   }
-  .file-item {
-    font-family: monospace;
-    font-size: 12px;
-    margin-top: 4px;
-  }
 </style>
 </head>
 <body>
@@ -311,14 +415,14 @@ HTML = """<!DOCTYPE html>
 
   <label for="inp">Input Excel File (*.xlsx, *.xlsm, *.xls)</label>
   <div class="row">
-    <input id="inp" placeholder="Click to choose Excel file..." readonly onclick="pickIn()">
-    <button class="secondary" type="button" onclick="pickIn()">Browse</button>
+    <input id="inp" placeholder="Click Browse or paste Excel file path...">
+    <button class="secondary" type="button" id="btnInp" onclick="pickIn()">Browse</button>
   </div>
 
-  <label for="out">Output Folder (optional, defaults to input file folder)</label>
+  <label for="out">Output Folder (optional, defaults to same folder as input)</label>
   <div class="row">
-    <input id="out" placeholder="Same folder as input" readonly onclick="pickOut()">
-    <button class="secondary" type="button" onclick="pickOut()">Browse</button>
+    <input id="out" placeholder="Same folder as input (or choose custom folder)...">
+    <button class="secondary" type="button" id="btnOut" onclick="pickOut()">Browse</button>
   </div>
 
   <button class="go" id="go" type="button" onclick="run()">Convert</button>
@@ -327,20 +431,40 @@ HTML = """<!DOCTYPE html>
 
 <script>
 async function pickIn() {
+  const btn = document.getElementById('btnInp');
+  btn.disabled = true;
+  btn.textContent = 'Opening...';
   try {
     const p = await pywebview.api.pick_input();
-    if (p) document.getElementById('inp').value = p;
+    if (p) {
+      document.getElementById('inp').value = p;
+      const out = document.getElementById('out');
+      if (!out.value) {
+        const sep = p.includes('\\\\') ? '\\\\' : '/';
+        const idx = p.lastIndexOf(sep);
+        if (idx > 0) out.placeholder = p.substring(0, idx);
+      }
+    }
   } catch (err) {
     console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Browse';
   }
 }
 
 async function pickOut() {
+  const btn = document.getElementById('btnOut');
+  btn.disabled = true;
+  btn.textContent = 'Opening...';
   try {
     const p = await pywebview.api.pick_output_dir();
     if (p) document.getElementById('out').value = p;
   } catch (err) {
     console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Browse';
   }
 }
 
