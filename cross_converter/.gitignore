@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build outputs
+build/
+dist/
+*.manifest
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Excel test and output files
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+
+# Editor / IDE configuration
+.vscode/
+.vscode-persist/
+.idea/
+*.swp
+*.swo
+
+# Operating System files
+.DS_Store
+Thumbs.db
