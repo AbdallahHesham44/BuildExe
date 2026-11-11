@@ -169,43 +169,46 @@ def wait_for_build(commit_sha):
 
     run_id = None
     start_time = time.time()
-    info("Waiting for GitHub Actions to trigger the build workflow...")
+    info(f"Waiting for GitHub Actions build for commit [{commit_sha[:7]}]...")
 
-    # Poll for the workflow run matching this commit or branch
-    for _ in range(18):  # wait up to ~90s to detect the run
+    # 1. First poll for an auto-triggered push workflow matching this commit
+    for _ in range(8):  # wait up to 40s
         time.sleep(5)
         runs_data = api_request(f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=5", token=token)
         for r in runs_data.get("workflow_runs", []):
-            if r.get("head_sha") == commit_sha or r.get("head_branch") == GITHUB_BRANCH:
+            if r.get("head_sha") == commit_sha:
                 run_id = r["id"]
-                html_url = r["html_url"]
-                info(f"Build workflow found! Run ID: {run_id}")
-                info(f"Tracking run URL: {html_url}")
+                info(f"Build workflow detected! Run ID: {run_id}")
+                info(f"Tracking run URL: {r.get('html_url')}")
                 break
         if run_id:
             break
 
+    # 2. If no push workflow triggered (e.g. non-source file changed), dispatch manually
     if not run_id:
-        # Trigger workflow manually via workflow_dispatch if not auto-triggered
-        warn("Push trigger taking long; triggering manual workflow_dispatch...")
+        info("No automatic push run detected; triggering workflow manually via workflow_dispatch...")
         api_request(
             f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{WORKFLOW_NAME}/dispatches",
             method="POST",
             data={"ref": GITHUB_BRANCH},
             token=token,
         )
-        time.sleep(6)
-        runs_data = api_request(f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=3", token=token)
-        for r in runs_data.get("workflow_runs", []):
-            if r.get("status") in ["queued", "in_progress"]:
-                run_id = r["id"]
-                info(f"Build workflow dispatched! Run ID: {run_id}")
+        for _ in range(8):
+            time.sleep(5)
+            runs_data = api_request(f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=3", token=token)
+            for r in runs_data.get("workflow_runs", []):
+                if r.get("status") in ["queued", "in_progress"]:
+                    run_id = r["id"]
+                    info(f"Dispatched build workflow found! Run ID: {run_id}")
+                    info(f"Tracking run URL: {r.get('html_url')}")
+                    break
+            if run_id:
                 break
 
     if not run_id:
-        err("Could not find a workflow run on GitHub Actions. Please check your GitHub repository.")
+        err("Could not find or trigger a workflow run on GitHub Actions. Please check your GitHub repository.")
 
-    # Wait for completion
+    # 3. Wait for completion
     last_status = ""
     while True:
         data = api_request(f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs/{run_id}", token=token)
@@ -271,7 +274,7 @@ def download_artifact(run_id):
         if os.path.exists(exe_path):
             info(f"Extracted executable to: {exe_path}")
     except Exception as e:
-        warn(f"Could not extract zip (it may still be opened as a zip file): {e}")
+        warn(f"Could not extract zip: {e}")
 
     return dest_zip
 
