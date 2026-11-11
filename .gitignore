@@ -20,6 +20,14 @@ env/
 *.xls
 *.csv
 
+# Secret tokens and credentials
+.github_token
+*.token
+
+# Executables & zip artifacts in repo root
+*.exe
+*.zip
+
 # Editor / IDE configuration
 .vscode/
 .vscode-persist/
