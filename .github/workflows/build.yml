@@ -1,0 +1,18 @@
+name: Build exe
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pywebview pandas openpyxl pyinstaller
+      - run: pyinstaller --noconsole --onefile --name QA_Tool --collect-all webview app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QA_Tool
+          path: dist/QA_Tool.exe
