@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pywebview pandas openpyxl pyinstaller
-      - run: pyinstaller --noconsole --onefile --name QA_Tool --collect-all webview app.py
+      - run: pyinstaller --noconsole --onefile --name QA_Tool --collect-all webview CheckCrossesMissingEXE/app.py
       - uses: actions/upload-artifact@v4
         with:
           name: QA_Tool
